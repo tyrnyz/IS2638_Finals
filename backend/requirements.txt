@@ -1,0 +1,7 @@
+fastapi
+uvicorn[standard]
+python-docx
+pandas
+supabase
+python-dotenv
+numpy

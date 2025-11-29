@@ -1,6 +1,6 @@
 // frontend/src/pages/UploadPage.jsx
 import React, { useRef, useState } from "react";
-import { uploadFile } from "../src/api/api";
+import { uploadFile } from "../api/api";
 
 export default function UploadPage() {
   const fileRef = useRef();
@@ -23,22 +23,21 @@ export default function UploadPage() {
 
   const uploadFileClick = async () => {
     const file = fileRef.current.files?.[0];
-    if (!file) return alert("Please select the airlines file first.");
+    if (!file) return alert("Please select the file first (CSV or DOCX).");
     setBusy(true);
     setResult(null);
 
-    // start a small fake progress until upload progress events arrive
+    // small fake progress until upload events arrive
     const fakeId = fakeProgress(20, 800);
 
     try {
-      const res = await uploadFile(file, "airline", (pct) => {
+      const dataset = document.getElementById("dataset")?.value || "airline";
+      const res = await uploadFile(file, dataset, (pct) => {
         clearInterval(fakeId);
         setProgress(pct);
       });
 
-      // ensure progress shows complete
       setProgress(100);
-
       setResult({ ok: true, message: "Upload succeeded", detail: res });
     } catch (err) {
       clearInterval(fakeId);
@@ -74,15 +73,29 @@ export default function UploadPage() {
 
   return (
     <div className="card-large">
-      <div className="accent">Airlines — Upload & Verify</div>
+      <div className="accent">Upload & Verify</div>
 
       <div className="columns">
         <div className="left-panel">
-          <div style={{ fontWeight: 700, color: "var(--accent)", marginBottom: 8 }}>Upload airlines file</div>
+          <div style={{ fontWeight: 700, color: "var(--accent)", marginBottom: 8 }}>Upload file (CSV or DOCX)</div>
 
           <div className="upload-area">
             <div className="muted">Upload file</div>
-            <input ref={fileRef} type="file" aria-label="Upload airlines file" style={{ marginTop: 8 }} />
+
+            <div style={{ marginTop: 8, display: "flex", gap: 8 }}>
+              <input
+                ref={fileRef}
+                type="file"
+                accept=".csv, .docx, application/vnd.openxmlformats-officedocument.wordprocessingml.document, text/csv"
+                aria-label="Upload file (CSV or DOCX)"
+              />
+
+              <select id="dataset" defaultValue="airline" style={{ padding: 6 }}>
+                <option value="airline">Airline</option>
+                <option value="passenger">Passenger</option>
+                <option value="flight">Flight</option>
+              </select>
+            </div>
 
             <div style={{ display: "flex", gap: 10, alignItems: "center", marginTop: 10 }}>
               <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -91,20 +104,19 @@ export default function UploadPage() {
               </label>
 
               <button className="btn-primary" onClick={uploadFileClick} disabled={busy}>Upload</button>
-
               <button className="btn-ghost" onClick={processClick} disabled={busy}>Process</button>
             </div>
 
             <div style={{ marginTop: 12 }}>
               <div className="muted">Progress</div>
-              <div className="progress-bar">
-                <div className="progress-fill" style={{ width: `${progress}%` }} />
+              <div className="progress-bar" style={{ background: "#eee", height: 10, borderRadius: 6 }}>
+                <div className="progress-fill" style={{ width: `${progress}%`, height: "100%", background: "linear-gradient(90deg,#4caf50,#81c784)", borderRadius: 6 }} />
               </div>
             </div>
           </div>
 
           <div style={{ marginTop: 18 }}>
-            <div style={{ fontWeight: 700, color: "var(--accent)", marginBottom: 6 }}>Insurance Eligibility</div>
+            <div style={{ fontWeight: 700, color: "var(--accent)", marginBottom: 6 }}>Insurance Eligibility (example)</div>
 
             <div className="card">
               <div style={{ marginBottom: 8 }}>
@@ -122,11 +134,6 @@ export default function UploadPage() {
                 <input id="baggage" type="number" min="0" placeholder="# of bags" style={{ width: "100%", padding: 8, borderRadius: 6, border: "1px solid #ddd" }} />
               </div>
 
-              <div style={{ marginBottom: 8 }}>
-                <label className="muted">Date</label>
-                <input id="date" type="date" style={{ width: "100%", padding: 8, borderRadius: 6, border: "1px solid #ddd" }} />
-              </div>
-
               <div style={{ display: "flex", gap: 10, alignItems: "center", marginTop: 8 }}>
                 <button className="btn-primary" onClick={verifyEligibility}>Verify</button>
                 <div style={{ minWidth: 200 }}>
@@ -134,7 +141,6 @@ export default function UploadPage() {
                     <div className={`result ${result.ok ? "eligible" : "not"}`}>{result.message}</div>
                   )}
                 </div>
-
                 <div className="exclaim">!</div>
               </div>
             </div>
@@ -148,11 +154,6 @@ export default function UploadPage() {
         <div className="right-panel">
           <div style={{ fontWeight: 700, color: "var(--accent)" }}>Rules / Notes</div>
 
-          <div className="note">
-            <div style={{ fontWeight: 700, marginBottom: 6 }}>Flight delayed by &gt; 4 hrs</div>
-            <div className="muted">If flight is delayed more than 4 hours — the customer could be eligible for compensation (example rule).</div>
-          </div>
-
           <div className="note" style={{ marginTop: 8 }}>
             <div style={{ fontWeight: 700, marginBottom: 6 }}>Other checks</div>
             <ul className="muted">
@@ -160,11 +161,6 @@ export default function UploadPage() {
               <li>Has claim been previously submitted?</li>
               <li>Required documents uploaded?</li>
             </ul>
-          </div>
-
-          <div style={{ marginTop: 18, paddingTop: 12, borderTop: "1px dashed rgba(0,0,0,0.05)", color: "#666" }}>
-            <div style={{ fontWeight: 700, color: "var(--accent)", marginBottom: 6 }}>Designer scribble</div>
-            <div>Sketchy notes: "Disaster is cold", "Success is damaged" — (placeholder).</div>
           </div>
         </div>
       </div>

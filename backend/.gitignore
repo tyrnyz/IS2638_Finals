@@ -1,0 +1,26 @@
+# Python venv
+.venv/
+env/
+ENV/
+venv/
+*.pyc
+__pycache__/
+
+# Environment variables
+.env
+.env.*
+
+# Logs
+*.log
+
+# Temp uploaded files
+tmp/
+temp/
+*.tmp
+
+# VSCode
+.vscode/
+
+# OS junk
+.DS_Store
+Thumbs.db

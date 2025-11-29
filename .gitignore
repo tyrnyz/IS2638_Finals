@@ -1,0 +1,14 @@
+# Backend ignore
+backend/.env
+backend/.env.*
+backend/.venv/
+backend/__pycache__/
+
+# Frontend ignore
+frontend/node_modules/
+frontend/dist/
+
+# Global ignore
+.DS_Store
+Thumbs.db
+.vscode/
