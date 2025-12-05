@@ -226,12 +226,16 @@ REQUIRED_FIELDS = {
     "airlines": [["airlinekey"], ["airlinename"]],
     "passenger": [["passengerkey"], ["fullname"]],
     "passengers": [["passengerkey"], ["fullname"]],
+    # flights: require flightkey + origin + destination (accept multiple column name possibilities)
     "flight": [["flightkey"], ["originairportkey", "origin_airportkey", "origin"], ["destinationairportkey", "destination_airportkey", "destination"]],
     "flights": [["flightkey"], ["originairportkey", "origin"], ["destinationairportkey", "destination"]],
+    # airports: require either airportkey OR airportname; also prefer at least city or country
     "airport": [["airportkey"], ["airportname"], ["city", "country"]],
     "airports": [["airportkey"], ["airportname"], ["city", "country"]],
-    "travelagency": [["agency"], ["saleamount", "sale_amount"], ["saledate", "sale_date"]],
-    "travel_agency": [["agency"], ["saleamount", "sale_amount"], ["saledate", "sale_date"]],
+    # travel agency: require agency and sale amount + sale date
+    "travelagency": [["agency", "agencykey", "agencyname"], ["saleamount", "sale_amount"], ["saledate", "sale_date"]],
+    "travel_agency": [["agency", "agencykey", "agencyname"], ["saleamount", "sale_amount"], ["saledate", "sale_date"]],
+    # corporate sales: require invoice or transactionid and some sale info
     "corporatesales": [["invoice"], ["transactionid"], ["saleamount", "sale_amount", "saledate", "sale_date"]],
     "corporate_sales": [["invoice"], ["transactionid"], ["saleamount", "sale_amount", "saledate", "sale_date"]],
 }
@@ -406,52 +410,6 @@ def parse_csv_text_to_dicts(csv_text: str) -> List[Dict[str, Any]]:
         if any(v is not None and v != "" for v in row.values()):
             rows.append(row)
     return rows
-
-
-# -----------------------
-# convert-or-ingest (preview)
-# -----------------------
-@app.post("/api/convert-or-ingest", response_class=PlainTextResponse)
-async def convert_or_ingest(file: UploadFile = File(...)):
-    filename = file.filename or "uploaded"
-    content_type = file.content_type or ""
-    content = await file.read()
-    size = len(content)
-    if size == 0:
-        raise HTTPException(status_code=400, detail="Empty file uploaded.")
-    if size > MAX_DOCX_SIZE:
-        raise HTTPException(status_code=413, detail=f"File too large. Max {MAX_DOCX_SIZE} bytes.")
-    lower = filename.lower()
-
-    if lower.endswith(".csv") or "text/csv" in content_type:
-        try:
-            csv_text = content.decode("utf-8")
-        except UnicodeDecodeError:
-            csv_text = content.decode("latin-1")
-        if "," not in csv_text and ";" not in csv_text and "\t" not in csv_text:
-            raise HTTPException(status_code=400, detail="Uploaded file doesn't appear to be a CSV.")
-        return PlainTextResponse(content=csv_text, media_type="text/csv", headers={
-            "Content-Disposition": f'attachment; filename="{filename if filename.endswith(".csv") else "data.csv"}"'
-        })
-
-    if lower.endswith(".docx") or content_type in ALLOWED_DOCX_CONTENT_TYPES:
-        try:
-            bio = BytesIO(content)
-            csv_text = docx_to_csv_text_with_fallback(bio, table_selection="first")
-        except Exception as e:
-            raise HTTPException(status_code=400, detail=f"Conversion failed: {e}")
-        return PlainTextResponse(content=csv_text, media_type="text/csv", headers={
-            "Content-Disposition": f'attachment; filename="{filename.rsplit(".",1)[0]}.csv"'
-        })
-
-    try:
-        text = content.decode("utf-8")
-        if "," in text or ";" in text or "\t" in text:
-            return PlainTextResponse(content=text, media_type="text/csv")
-    except Exception:
-        pass
-
-    raise HTTPException(status_code=415, detail=f"Unsupported file type: {content_type} / {filename}")
 
 
 # -----------------------
@@ -729,6 +687,17 @@ async def process_staged(staging_id: Optional[int] = Form(None), upload_id: Opti
     rpc_name = cfg["rpc"]
     etl_module = cfg["etl_module"]
 
+    # Allowed insert columns per cleaned_table to avoid sending unknown keys to supabase
+    # (keeps behavior safe when ETL dictionaries contain extra keys)
+    ALLOWED_COLUMNS = {
+        "cleaned_airlines": {"airlinekey", "airlinename", "alliance", "rawjson", "upload_id"},
+        "cleaned_airports": {"airportkey", "airportname", "city", "country", "rawjson", "upload_id"},
+        "cleaned_flights": {"flightkey", "originairportkey", "destinationairportkey", "aircrafttype", "rawjson", "upload_id"},
+        "cleaned_passengers": {"passengerkey", "fullname", "email", "loyaltystatus", "rawjson", "upload_id"},
+        "cleaned_travelagency": {"agencykey", "agencyname", "bookingid", "passengername", "flightnumber", "saleamount", "currency", "saledate", "rawjson", "upload_id"},
+        "cleaned_corporatesales": {"invoice", "transactionid", "saleamount", "currency", "saledate", "rawjson", "upload_id"},
+    }
+
     # create a processing etl_runs row (or reuse upload_id's etl_runs if provided)
     run_id = insert_etl_run(f"process_{detected_entity}", "started", note=f"staging_id={staging_row.get('id')}")
     try:
@@ -791,21 +760,31 @@ async def process_staged(staging_id: Optional[int] = Form(None), upload_id: Opti
                 rec.setdefault("rawjson", r.get("rawjson", r))
                 rec["upload_id"] = staging_row.get("upload_id") or run_id
 
-                # ---------- NEW: normalize alliance in Python ETL: replace missing/null/empty with 'none' ----------
-                # This ensures the cleaned table receives 'none' (string) instead of None/NULL for alliance.
-                # It intentionally does not treat alliance as required — it just normalizes missing values.
-                try:
-                    # if alliance key missing or empty/None -> set to 'none'
-                    if "alliance" not in rec or rec.get("alliance") is None or str(rec.get("alliance")).strip() == "":
-                        rec["alliance"] = "none"
-                    else:
-                        # normalize whitespace
-                        rec["alliance"] = str(rec.get("alliance")).strip()
-                except Exception:
-                    rec["alliance"] = "none"
+                # ---------- Normalize alliance ONLY for cleaned_airlines and set to 'None' if missing ----------
+                if cleaned_table == "cleaned_airlines":
+                    try:
+                        if "alliance" not in rec or rec.get("alliance") is None or str(rec.get("alliance")).strip() == "":
+                            rec["alliance"] = "None"
+                        else:
+                            rec["alliance"] = str(rec.get("alliance")).strip()
+                    except Exception:
+                        rec["alliance"] = "None"
                 # -----------------------------------------------------------------------------------------------
 
-                cleaned_records.append(rec)
+                # Filter out keys not allowed by the target cleaned_table (prevents unknown-column insert errors)
+                allowed = ALLOWED_COLUMNS.get(cleaned_table, None)
+                if allowed is not None:
+                    filtered = {k: v for k, v in rec.items() if k in allowed}
+                    # ensure rawjson and upload_id are present
+                    if "rawjson" not in filtered:
+                        filtered["rawjson"] = rec.get("rawjson")
+                    if "upload_id" not in filtered:
+                        filtered["upload_id"] = rec.get("upload_id")
+                    cleaned_records.append(filtered)
+                else:
+                    # no allowed set defined -> send full rec (legacy behavior)
+                    cleaned_records.append(rec)
+
             cleaned_count = batch_insert(cleaned_table, cleaned_records)
 
         # If cleaned_rows empty, we still want to run the RPC using upload_id so the server-side RPC can consume staged rows
